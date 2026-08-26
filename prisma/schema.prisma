@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Still smaller than the full target schema from Part 4: no User /
+// APIKey / Deployment / Worker / Invocation tables yet - those arrive
+// with the Auth and Scheduler phases. FunctionVersion and Build earn
+// their place NOW because Phase 5 has a real build pipeline that
+// actually creates and reads them.
+model Function {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  memoryMb  Int      @default(128) @map("memory_mb")
+  timeoutMs Int      @default(3000) @map("timeout_ms")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  versions FunctionVersion[]
+  builds   Build[]
+
+  @@map("functions")
+}
+
+// An immutable build artifact. There is deliberately no "active"/
+// "inactive" status column yet - the newest successfully built version
+// (highest versionNumber) is automatically the one invoked. Explicit
+// promotion/rollback between versions is a real feature we're choosing
+// not to half-build until a phase actually needs it.
+model FunctionVersion {
+  id            String   @id @default(uuid())
+  functionId    String   @map("function_id")
+  versionNumber Int      @map("version_number")
+  imageTag      String   @map("image_tag")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  function Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
+
+  @@unique([functionId, versionNumber])
+  @@map("function_versions")
+}
+
+// The operational record of ONE build attempt. status is a plain string
+// rather than a Postgres enum for now (PENDING | RUNNING | SUCCESS |
+// FAILED) - deliberately simple; an enum is a one-line upgrade later if
+// we ever need the database itself to reject an invalid status.
+model Build {
+  id              String    @id @default(uuid())
+  functionId      String    @map("function_id")
+  sourceObjectKey String    @map("source_object_key")
+  status          String
+  imageTag        String?   @map("image_tag")
+  errorMessage    String?   @map("error_message")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  // NULL until the outbox relay (build-outbox-relay.service.ts) has
+  // published this build to the Redis stream. Phase 6's dual-write
+  // safety net: submitBuild() writes ONLY this row; the relay is what
+  // notices it and dispatches it, on its own schedule, independently.
+  publishedToStreamAt DateTime? @map("published_to_stream_at")
+
+  function Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
+
+  @@map("builds")
+}

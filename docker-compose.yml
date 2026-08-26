@@ -1,0 +1,48 @@
+# Local dev infrastructure. Kafka joins this file only when a phase
+# actually needs it - never speculatively.
+services:
+  # The message broker for build (and later, invocation) dispatch - see
+  # Part 1/9 of the design docs, which named Redis Streams for both
+  # queues from the very first architecture diagram.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - mini-cloud-redis-data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mini_cloud
+      POSTGRES_PASSWORD: mini_cloud
+      POSTGRES_DB: mini_cloud
+    ports:
+      - '5432:5432'
+    volumes:
+      - mini-cloud-postgres-data:/var/lib/postgresql/data
+
+  # S3-compatible object storage for uploaded function source. MinIO
+  # speaks the actual S3 API, so the SAME @aws-sdk/client-s3 code that
+  # talks to MinIO here would talk to real AWS S3 in production by
+  # changing only the endpoint/credentials - nothing about the
+  # application code changes.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: mini_cloud
+      MINIO_ROOT_PASSWORD: mini_cloud_secret
+    command: server /data --console-address ":9001"
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # web console
+    volumes:
+      - mini-cloud-minio-data:/data
+
+volumes:
+  mini-cloud-postgres-data:
+  mini-cloud-minio-data:
+  mini-cloud-redis-data:
