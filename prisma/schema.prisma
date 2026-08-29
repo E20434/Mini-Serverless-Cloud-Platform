@@ -7,21 +7,59 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Still smaller than the full target schema from Part 4: no User /
-// APIKey / Deployment / Worker / Invocation tables yet - those arrive
-// with the Auth and Scheduler phases. FunctionVersion and Build earn
-// their place NOW because Phase 5 has a real build pipeline that
-// actually creates and reads them.
+// Still smaller than the full target schema from Part 4: no Deployment /
+// Worker / Invocation tables yet - Worker state deliberately lives in
+// Redis (Phase 8), not here, and Deployment/Invocation history arrive
+// with the Observability phase. User and ApiKey earn their place NOW,
+// in Phase 9, because multi-tenancy finally needs them for real.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  functions Function[]
+  apiKeys   ApiKey[]
+
+  @@map("users")
+}
+
+// keyHash is SHA-256, not bcrypt - see the Phase 9 write-up for why an
+// API key (checked on every request, needs a fast indexed lookup) is
+// hashed differently than a password (checked rarely, needs slowness as
+// its actual defense).
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  keyHash    String    @unique @map("key_hash")
+  name       String
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
 model Function {
   id        String   @id @default(uuid())
-  name      String   @unique
+  userId    String   @map("user_id")
+  name      String
   memoryMb  Int      @default(128) @map("memory_mb")
   timeoutMs Int      @default(3000) @map("timeout_ms")
   createdAt DateTime @default(now()) @map("created_at")
 
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions FunctionVersion[]
   builds   Build[]
 
+  // THE actual Phase 9 schema change: names are unique PER USER now, not
+  // globally. Two different users can each have a function named
+  // "hello" - exactly the real-world requirement multi-tenancy implies,
+  // and exactly what a bare `name String @unique` could never support.
+  @@unique([userId, name])
   @@map("functions")
 }
 
