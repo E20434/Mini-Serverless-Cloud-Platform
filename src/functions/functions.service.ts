@@ -16,10 +16,11 @@ export class FunctionsService {
     private readonly workerRegistry: WorkerRegistryService,
   ) {}
 
-  async register(dto: RegisterFunctionDto): Promise<FunctionRecord> {
+  async register(userId: string, dto: RegisterFunctionDto): Promise<FunctionRecord> {
     try {
       return await this.prisma.function.create({
         data: {
+          userId,
           name: dto.name,
           memoryMb: dto.memoryMb ?? 128,
           timeoutMs: dto.timeoutMs ?? 3000,
@@ -27,27 +28,37 @@ export class FunctionsService {
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        // Unique constraint is now (userId, name) - this fires only for
+        // a conflict within the SAME account. Someone else's function
+        // named identically is invisible to this check entirely, by
+        // design.
         throw new ConflictException(`Function "${dto.name}" already exists`);
       }
       throw err;
     }
   }
 
-  list(): Promise<FunctionRecord[]> {
-    return this.prisma.function.findMany({ orderBy: { createdAt: 'asc' } });
+  list(userId: string): Promise<FunctionRecord[]> {
+    return this.prisma.function.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
   }
 
-  async get(name: string): Promise<FunctionRecord> {
-    const record = await this.prisma.function.findUnique({ where: { name } });
+  async get(userId: string, name: string): Promise<FunctionRecord> {
+    // Scoping by (userId, name) TOGETHER in the WHERE clause - not "look
+    // it up by name, then separately check ownership" - is what actually
+    // matters here. The second approach would still work correctly, but
+    // scoping the query itself means there is no code path where a row
+    // belonging to a different user is ever fetched into memory at all,
+    // even transiently.
+    const record = await this.prisma.function.findUnique({ where: { userId_name: { userId, name } } });
     if (!record) {
       throw new NotFoundException(`Function "${name}" not found`);
     }
     return record;
   }
 
-  async remove(name: string): Promise<void> {
+  async remove(userId: string, name: string): Promise<void> {
     try {
-      await this.prisma.function.delete({ where: { name } });
+      await this.prisma.function.delete({ where: { userId_name: { userId, name } } });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
         throw new NotFoundException(`Function "${name}" not found`);
@@ -56,8 +67,8 @@ export class FunctionsService {
     }
   }
 
-  async invoke(name: string, event: unknown): Promise<ExecutionOutcome> {
-    const record = await this.get(name); // 404 if unknown - platform-level
+  async invoke(userId: string, name: string, event: unknown): Promise<ExecutionOutcome> {
+    const record = await this.get(userId, name); // 404 if unknown OR owned by someone else - both look identical from outside
 
     // "Active version" = highest versionNumber that has ever built
     // successfully. There's no explicit promotion/rollback yet - see the
@@ -91,7 +102,9 @@ export class FunctionsService {
       // As of Phase 7, this is a queue dispatch, not a direct Docker
       // call - the container actually runs in a separate Worker process,
       // possibly on a different machine, communicating with this API
-      // process only through Redis.
+      // process only through Redis. Note the job payload carries no
+      // userId at all - the Worker doesn't need to know or care whose
+      // function this is, only what image to run.
       return await this.invocationDispatch.dispatch({
         imageTag: latestVersion.imageTag,
         event,

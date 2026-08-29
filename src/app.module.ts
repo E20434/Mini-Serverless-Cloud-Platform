@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from './auth/auth.module';
 import { BuildModule } from './build/build.module';
 import { FunctionsModule } from './functions/functions.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -18,6 +19,7 @@ import { WorkersModule } from './workers/workers.module';
     RedisModule,
     StorageModule,
     WorkerRegistryModule,
+    AuthModule,
     FunctionsModule,
     BuildModule,
     WorkersModule,

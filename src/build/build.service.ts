@@ -35,9 +35,16 @@ export class BuildService {
     });
   }
 
-  async getBuild(buildId: string): Promise<Build> {
+  async getBuild(functionId: string, buildId: string): Promise<Build> {
     const build = await this.prisma.build.findUnique({ where: { id: buildId } });
-    if (!build) {
+    // Real Phase 9 bug, worth naming: checking ONLY "does this build
+    // exist" and separately "does the function in the URL belong to me"
+    // would still let a caller read any OTHER function's build (even one
+    // owned by a different user entirely) just by guessing/enumerating a
+    // build ID - the function-name ownership check alone never
+    // constrains which build a caller can ask about. Requiring the
+    // build's OWN functionId to match closes that gap.
+    if (!build || build.functionId !== functionId) {
       throw new NotFoundException(`Build "${buildId}" not found`);
     }
     return build;

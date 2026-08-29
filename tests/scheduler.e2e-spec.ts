@@ -6,17 +6,23 @@ import { Test } from '@nestjs/testing';
 import Redis from 'ioredis';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { PrismaService } from '../src/prisma/prisma.service';
 import { WorkerModule } from '../src/worker/worker.module';
 import { INVOCATION_CONSUMER_GROUP, INVOCATION_STREAM_KEY } from '../src/worker/invocation-stream.constants';
+import { authHeader, createTestUser } from './test-helpers/auth';
 
 const fn = (name: string) => path.join(__dirname, '..', 'functions', name);
 const REGISTRY_KEY = 'workers:registry';
 
-async function waitForBuildToFinish(app: INestApplication, name: string, buildId: string, timeoutMs = 20000) {
+async function waitForBuildToFinish(
+  app: INestApplication,
+  auth: [string, string],
+  name: string,
+  buildId: string,
+  timeoutMs = 20000,
+) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const res = await request(app.getHttpServer()).get(`/functions/${name}/builds/${buildId}`).expect(200);
+    const res = await request(app.getHttpServer()).get(`/functions/${name}/builds/${buildId}`).set(...auth).expect(200);
     if (res.body.status === 'SUCCESS' || res.body.status === 'FAILED') return res.body;
     if (Date.now() > deadline) throw new Error(`Build did not finish in time (status: ${res.body.status})`);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -38,6 +44,7 @@ describe('Scheduler: worker registry and smart reclaim (e2e)', () => {
   let workerApp: INestApplicationContext | undefined;
   let redis: Redis;
   let imageTag: string;
+  let auth: [string, string];
 
   beforeAll(async () => {
     // Short idle threshold so "should this stale message be reclaimed"
@@ -50,17 +57,18 @@ describe('Scheduler: worker registry and smart reclaim (e2e)', () => {
 
     redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
-    const prisma = moduleRef.get(PrismaService);
-    await prisma.function.deleteMany({ where: { name: 'scheduler-test' } });
+    const { token } = await createTestUser(app);
+    auth = authHeader(token);
 
     // One real, invokable image, reused across both manufactured-message
     // tests below.
-    await request(app.getHttpServer()).post('/functions').send({ name: 'scheduler-test' }).expect(201);
+    await request(app.getHttpServer()).post('/functions').set(...auth).send({ name: 'scheduler-test' }).expect(201);
     const upload = await request(app.getHttpServer())
       .post('/functions/scheduler-test/versions')
+      .set(...auth)
       .attach('source', fn('hello.js'))
       .expect(201);
-    const build = await waitForBuildToFinish(app, 'scheduler-test', upload.body.buildId);
+    const build = await waitForBuildToFinish(app, auth, 'scheduler-test', upload.body.buildId);
     imageTag = build.imageTag;
 
     // Consumer group must exist before we can manually XADD/XREADGROUP
@@ -83,7 +91,7 @@ describe('Scheduler: worker registry and smart reclaim (e2e)', () => {
   it('GET /workers reflects a real running worker heartbeat', async () => {
     workerApp = await NestFactory.createApplicationContext(WorkerModule);
 
-    const res = await request(app.getHttpServer()).get('/workers').expect(200);
+    const res = await request(app.getHttpServer()).get('/workers').set(...auth).expect(200);
     expect(res.body.length).toBeGreaterThanOrEqual(1);
     expect(res.body.some((w: { healthy: boolean }) => w.healthy)).toBe(true);
 

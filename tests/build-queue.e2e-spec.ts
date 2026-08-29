@@ -43,8 +43,15 @@ describe('Build queue crash recovery (e2e)', () => {
     const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
     try {
-      await prisma.function.deleteMany({ where: { name: 'reclaim-test' } });
-      const functionRecord = await prisma.function.create({ data: { name: 'reclaim-test' } });
+      // Phase 9: Function.userId is required now, and names are unique
+      // per-user, not globally - a plain fixture user, created directly
+      // (never logged into via HTTP, so the password hash is never
+      // actually checked against anything).
+      await prisma.user.deleteMany({ where: { email: 'build-queue-test@example.com' } });
+      const user = await prisma.user.create({
+        data: { email: 'build-queue-test@example.com', passwordHash: 'unused-fixture-user' },
+      });
+      const functionRecord = await prisma.function.create({ data: { userId: user.id, name: 'reclaim-test' } });
 
       // Manufacture exactly what the outbox relay would have produced -
       // real source bytes in object storage, a real PENDING Build row.
