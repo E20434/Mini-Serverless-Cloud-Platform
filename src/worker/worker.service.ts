@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
 import { executeVersionedFunction, ExecutionOutcome } from '../containerExecutor';
+import { MetricsService } from '../metrics/metrics.service';
 import { REDIS_CLIENT } from '../queue/redis.module';
 import { WorkerRegistryService } from '../worker-registry/worker-registry.service';
 import { INVOCATION_CONSUMER_GROUP, INVOCATION_STREAM_KEY, invocationResultChannel } from './invocation-stream.constants';
@@ -41,6 +42,7 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly registry: WorkerRegistryService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async onModuleInit() {
@@ -147,11 +149,18 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
   private async handleMessage(messageId: string, fields: string[]) {
     const get = (key: string) => fields[fields.indexOf(key) + 1];
     const correlationId = get('correlationId');
+    const imageTag = get('imageTag');
+
+    // Structured logs, not free-text sentences - a real log aggregator
+    // (Loki/CloudWatch Logs Insights/ELK) queries and filters on fields
+    // like these; "Function started" as a bare string is useless the
+    // moment you have more than a handful of log lines to search through.
+    this.logger.log(JSON.stringify({ event: 'invocation.started', correlationId, imageTag, workerId: this.workerId }));
 
     this.inFlight++;
+    this.metrics.workerInFlight.set(this.inFlight);
     let outcome: ExecutionOutcome;
     try {
-      const imageTag = get('imageTag');
       const event = JSON.parse(get('event'));
       const timeoutMs = Number(get('timeoutMs'));
       const memoryMb = Number(get('memoryMb'));
@@ -160,7 +169,21 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
       outcome = { status: 'error', error: err instanceof Error ? err.message : String(err), durationMs: 0 };
     } finally {
       this.inFlight--;
+      this.metrics.workerInFlight.set(this.inFlight);
     }
+
+    this.metrics.invocationsTotal.inc({ status: outcome.status });
+    this.metrics.invocationDurationMs.observe(outcome.durationMs);
+    this.logger.log(
+      JSON.stringify({
+        event: outcome.status === 'success' ? 'invocation.completed' : 'invocation.failed',
+        correlationId,
+        imageTag,
+        status: outcome.status,
+        durationMs: outcome.durationMs,
+        workerId: this.workerId,
+      }),
+    );
 
     await this.redis.publish(invocationResultChannel(correlationId), JSON.stringify(outcome));
     await this.redis.xack(INVOCATION_STREAM_KEY, INVOCATION_CONSUMER_GROUP, messageId);

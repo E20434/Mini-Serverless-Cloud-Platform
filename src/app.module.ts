@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module';
 import { BuildModule } from './build/build.module';
 import { FunctionsModule } from './functions/functions.module';
+import { MetricsHttpModule } from './metrics/metrics-http.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './queue/redis.module';
 import { StorageModule } from './storage/storage.module';
@@ -19,10 +21,12 @@ import { WorkersModule } from './workers/workers.module';
     RedisModule,
     StorageModule,
     WorkerRegistryModule,
+    MetricsModule,
     AuthModule,
     FunctionsModule,
     BuildModule,
     WorkersModule,
+    MetricsHttpModule,
   ],
 })
 export class AppModule {}

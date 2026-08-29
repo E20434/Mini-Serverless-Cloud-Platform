@@ -35,6 +35,18 @@ export class FunctionsController {
     return this.functionsService.get(user.userId, name);
   }
 
+  @Get(':name/invocations')
+  @RequireScopes('functions:read')
+  listInvocations(@CurrentUser() user: AuthenticatedPrincipal, @Param('name') name: string) {
+    return this.functionsService.listInvocations(user.userId, name);
+  }
+
+  @Get(':name/metrics')
+  @RequireScopes('functions:read')
+  getMetrics(@CurrentUser() user: AuthenticatedPrincipal, @Param('name') name: string) {
+    return this.functionsService.getMetricsSummary(user.userId, name);
+  }
+
   @Delete(':name')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireScopes('functions:write')

@@ -42,7 +42,22 @@ services:
     volumes:
       - mini-cloud-minio-data:/data
 
+  # Scrapes /metrics from the API (port 3000) and Worker (port 9200),
+  # both of which run as bare host processes today - see prometheus.yml
+  # for why that means host.docker.internal instead of a service name.
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    extra_hosts:
+      - 'host.docker.internal:host-gateway' # needed on Linux Docker hosts; a no-op on Docker Desktop, which already provides this
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - mini-cloud-prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+
 volumes:
   mini-cloud-postgres-data:
   mini-cloud-minio-data:
   mini-cloud-redis-data:
+  mini-cloud-prometheus-data:
