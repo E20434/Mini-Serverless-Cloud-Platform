@@ -7,11 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Still smaller than the full target schema from Part 4: no Deployment /
-// Worker / Invocation tables yet - Worker state deliberately lives in
-// Redis (Phase 8), not here, and Deployment/Invocation history arrive
-// with the Observability phase. User and ApiKey earn their place NOW,
-// in Phase 9, because multi-tenancy finally needs them for real.
+// Still smaller than the full target schema from Part 4: no Deployment
+// table yet - Worker state deliberately lives in Redis (Phase 8), not
+// here. Invocation earns its place NOW (Phase 10) because durable,
+// per-tenant invocation history is finally meaningful and worth writing.
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -51,9 +50,10 @@ model Function {
   timeoutMs Int      @default(3000) @map("timeout_ms")
   createdAt DateTime @default(now()) @map("created_at")
 
-  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  versions FunctionVersion[]
-  builds   Build[]
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions    FunctionVersion[]
+  builds      Build[]
+  invocations Invocation[]
 
   // THE actual Phase 9 schema change: names are unique PER USER now, not
   // globally. Two different users can each have a function named
@@ -75,7 +75,8 @@ model FunctionVersion {
   imageTag      String   @map("image_tag")
   createdAt     DateTime @default(now()) @map("created_at")
 
-  function Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  function    Function     @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  invocations Invocation[]
 
   @@unique([functionId, versionNumber])
   @@map("function_versions")
@@ -104,4 +105,31 @@ model Build {
   function Function @relation(fields: [functionId], references: [id], onDelete: Cascade)
 
   @@map("builds")
+}
+
+// One row per invocation ATTEMPT that actually reached the dispatch
+// layer - not every rejected HTTP request. A 404 (unknown function) or
+// 409 (no built version) never gets this far; those are platform
+// validation failures, not invocation attempts in the AWS-Lambda sense.
+// coldStart is always true today, honestly - this system has never
+// built container/warm-pool reuse (that's a Scaling-phase concern) - the
+// column exists so the metric has somewhere to go the moment it does.
+model Invocation {
+  id            String    @id @default(uuid())
+  functionId    String    @map("function_id")
+  versionId     String?   @map("version_id") // null for the NO_WORKER case - dispatch never got far enough to know which version would have run
+  requestId     String    @unique @map("request_id")
+  status        String // SUCCESS | ERROR | TIMEOUT | NO_WORKER
+  coldStart     Boolean   @default(true) @map("cold_start")
+  durationMs    Int       @map("duration_ms")
+  errorMessage  String?   @map("error_message")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  function Function        @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  version  FunctionVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  // The hot query from Part 4's original design, now real: "recent
+  // invocations for this function, newest first."
+  @@index([functionId, createdAt(sort: Desc)])
+  @@map("invocations")
 }

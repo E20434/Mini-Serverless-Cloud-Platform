@@ -1,0 +1,18 @@
+# The API and Worker run as bare `node` processes on the HOST, not as
+# containers - so Prometheus (which DOES run in a container) reaches them
+# via host.docker.internal, Docker Desktop's bridge back to the host
+# machine. This is a local-dev-only convenience: once the API/Worker are
+# themselves containerized (a later phase), they'd be scraped by service
+# name on the same Docker network instead, the way Postgres/Redis/MinIO
+# already are for THIS stack.
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'mini-cloud-api'
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+
+  - job_name: 'mini-cloud-worker'
+    static_configs:
+      - targets: ['host.docker.internal:9200']

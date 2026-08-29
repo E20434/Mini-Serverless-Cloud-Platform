@@ -10,6 +10,12 @@
  * starting an HTTP server, because a Worker has no routes to serve. This
  * is Nest's own supported way to run non-HTTP processes (workers, CLI
  * tools, cron jobs) through the same DI/module system as the API.
+ *
+ * Both WorkerService (the consumer loop) and WorkerMetricsServerService
+ * (the tiny plain-http /metrics listener) start themselves via their own
+ * onModuleInit hooks - nothing extra needs to happen here, which also
+ * means every e2e test that constructs WorkerModule directly exercises
+ * the exact same startup path this real entrypoint does.
  */
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
@@ -17,10 +23,10 @@ import { WorkerModule } from './worker/worker.module';
 
 async function bootstrap() {
   await NestFactory.createApplicationContext(WorkerModule);
-  // No app.listen() - nothing to listen on. The process stays alive
-  // because WorkerService's own consumer loop holds an open Redis
-  // connection (an active handle), the same reason a plain long-running
-  // script with an open socket never exits on its own.
+  // No app.listen() - nothing to listen on for the main app. The process
+  // stays alive because WorkerService's consumer loop and the metrics
+  // http.Server both hold open handles, the same reason a plain
+  // long-running script with an open socket never exits on its own.
   console.log('Worker process started.');
 }
 
