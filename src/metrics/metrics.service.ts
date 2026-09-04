@@ -47,7 +47,7 @@ export class MetricsService {
   // redundantly reporting the same global numbers.
   readonly invocationQueueDepth = new Gauge({
     name: 'mini_cloud_invocation_queue_depth',
-    help: 'Messages currently in the invocation stream, pending or unacked (XLEN)',
+    help: 'Consumer group LAG for the invocation stream: entries never yet delivered to any worker (NOT stream XLEN, which only grows)',
     registers: [this.registry],
   });
 
