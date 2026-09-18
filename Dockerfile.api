@@ -1,0 +1,39 @@
+# Containerizes the API process for the first time - every previous
+# phase ran it as a bare `node` process on the host. Needs the `docker`
+# CLI baked in (NOT a full daemon) because the Build pipeline
+# (BuildStreamConsumerService, still part of this monolith - see the
+# Phase 6 scope note) runs real `docker build` commands. See k8s/README.md
+# for how this container reaches a real Docker daemon once it's running
+# as a Pod - that's the actually interesting part of this phase.
+#
+# One `npm ci` only, in the builder stage, its full node_modules copied
+# wholesale into the runtime stage - NOT re-run there. A second, separate
+# `npm ci` in the runtime stage is both wasted work AND a real reliability
+# risk: it re-triggers every native postinstall script (bcrypt's compiled
+# binding, @prisma/engines' binary download) a second time, and the
+# second attempt at @prisma/engines' download is exactly what timed out
+# with ECONNRESET building this image for real. Copying node_modules
+# across stages means that work only ever has to succeed once.
+FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma ./prisma
+RUN npx prisma generate
+COPY tsconfig.json ./
+COPY src ./src
+RUN npx tsc -p tsconfig.json
+
+FROM node:20-alpine
+RUN apk add --no-cache openssl docker-cli
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+COPY prisma ./prisma
+
+EXPOSE 3000
+CMD ["node", "dist/main.js"]

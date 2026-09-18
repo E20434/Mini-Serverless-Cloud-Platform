@@ -1,0 +1,81 @@
+# Deployment = "keep N replicas of this Pod spec running, always." This
+# is the direct, standard replacement for what Phase 11 did by hand
+# (typing `npm run start:worker` extra times) - `replicas` here IS the
+# scaling knob, and a crashed Pod gets restarted automatically by the
+# same controller, something we never built ourselves for the API/Worker
+# processes at all.
+#
+# The docker.sock hostPath mount is the real, honest tradeoff of this
+# phase's Docker-in-Kubernetes choice (see k8s/kind-config.yaml and
+# k8s/README.md): any container with that socket mounted has
+# root-equivalent access to the host. A production multi-tenant cluster
+# would never do this - it's why real serverless platforms isolate with
+# Firecracker microVMs instead (Part 2's isolation discussion), not
+# containers sharing the host's own Docker daemon.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mini-cloud-api
+  namespace: mini-cloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mini-cloud-api
+  template:
+    metadata:
+      labels:
+        app: mini-cloud-api
+    spec:
+      containers:
+        - name: api
+          image: mini-cloud-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: mini-cloud-config
+            - secretRef:
+                name: mini-cloud-secrets
+          # requests: what the SCHEDULER uses to decide which node has
+          # room for this Pod (bin-packing) - a promise of "at least
+          # this much." limits: what the kernel actually ENFORCES via
+          # cgroups once running - literally the same mechanism as our
+          # own `docker run --memory` flag in containerExecutor.ts
+          # (Phase 2), just expressed through Kubernetes's abstraction
+          # instead of a raw Docker CLI flag.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # readinessProbe failing -> Pod is pulled OUT of the Service's
+          # load-balancing rotation, but left running (maybe it's just
+          # warming up, or briefly overloaded - killing it wouldn't help).
+          # livenessProbe failing -> the kubelet kills and restarts the
+          # container (it's presumed stuck/deadlocked). Same-shaped check,
+          # deliberately different consequences - conflating them is a
+          # real, common K8s mistake.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket

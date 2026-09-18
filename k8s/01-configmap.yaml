@@ -1,0 +1,23 @@
+# Non-secret configuration. Deliberate scope decision, worth stating: for
+# THIS phase, Postgres/Redis/MinIO stay exactly where they already are -
+# running via docker-compose on the host, reached from in-cluster Pods
+# via host.docker.internal, the same bridge Prometheus already uses
+# (Phase 10) to scrape host-run processes. A fully realistic cluster
+# would run these in-cluster too (StatefulSets + PersistentVolumeClaims),
+# or more realistically use managed equivalents entirely (RDS,
+# ElastiCache, S3) - which is precisely what Phase 13's AWS deployment
+# does. Re-deploying Postgres here would just be repeated work, not new
+# K8s concepts - this phase's actual subject is Deployment/Service/
+# ConfigMap/Secret/HPA, not "how to run a database."
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mini-cloud-config
+  namespace: mini-cloud
+data:
+  PORT: '3000'
+  WORKER_METRICS_PORT: '9200'
+  REDIS_URL: 'redis://host.docker.internal:6379'
+  S3_ENDPOINT: 'http://host.docker.internal:9000'
+  S3_REGION: 'us-east-1'
+  S3_BUCKET: 'mini-cloud-function-source'

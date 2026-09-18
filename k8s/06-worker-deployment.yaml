@@ -1,0 +1,66 @@
+# The Worker fleet, finally expressed as what it always conceptually was:
+# a set of identical, disposable, horizontally-scalable replicas. Every
+# worker generates its own identity at startup (Phase 8's
+# `worker-${pid}-${uuid}` consumer name), so Kubernetes creating,
+# killing, and replacing these Pods at will needs no coordination with
+# the app - it already assumed workers come and go.
+#
+# No Service in front of this Deployment: nothing calls a Worker
+# directly over HTTP (Phase 7's whole design) - work arrives via Redis
+# Streams, which is its own load-balancing mechanism (see
+# 04-api-service.yaml's comment). The only network exposure a Worker
+# needs is outbound.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mini-cloud-worker
+  namespace: mini-cloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mini-cloud-worker
+  template:
+    metadata:
+      labels:
+        app: mini-cloud-worker
+    spec:
+      containers:
+        - name: worker
+          image: mini-cloud-worker:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: mini-cloud-config
+            - secretRef:
+                name: mini-cloud-secrets
+          env:
+            # See containerExecutor.ts's comment and kind-config.yaml:
+            # `docker run -v <path>:/output` needs <path> to exist on the
+            # DAEMON's own filesystem, not this Pod's private one. This
+            # path is real on both sides via the matching hostPath volume
+            # below AND kind's extraMounts sharing the same path with the
+            # actual host.
+            - name: HOST_SCRATCH_DIR
+              value: /tmp/mini-cloud-scratch
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: scratch
+              mountPath: /tmp/mini-cloud-scratch
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: scratch
+          hostPath:
+            path: /tmp/mini-cloud-scratch
+            type: DirectoryOrCreate

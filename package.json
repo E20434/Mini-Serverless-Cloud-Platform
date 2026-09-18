@@ -9,6 +9,7 @@
     "start:api": "node --env-file=.env -r ts-node/register src/main.ts",
     "start:worker": "node --env-file=.env -r ts-node/register src/worker-main.ts",
     "docker:build": "docker build -t mini-cloud-runtime:latest ./runtime",
+    "build": "tsc -p tsconfig.json",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down",
     "prisma:migrate": "prisma migrate dev",

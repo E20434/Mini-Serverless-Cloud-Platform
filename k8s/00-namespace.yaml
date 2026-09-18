@@ -1,0 +1,11 @@
+# Namespace: a logical partition inside ONE cluster - separate DNS
+# scope, separate RBAC scope, separate resource-quota scope. Not
+# multi-tenancy in the Phase 9 sense (that isolates DATA within one
+# running application); this is infrastructure-level isolation between
+# whole deployments/environments (e.g. mini-cloud-dev vs mini-cloud-prod
+# could coexist in one cluster, sharing nothing but the underlying
+# hardware).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mini-cloud

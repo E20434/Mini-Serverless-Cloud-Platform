@@ -1,0 +1,48 @@
+# kind runs each "node" as an ordinary Docker container - so by default,
+# a kind node has NO access to the real host's Docker daemon; it's just
+# another container. extraMounts bind-mounts the actual Docker socket
+# (as Docker Desktop exposes it to every sibling container, the same way
+# `docker run -v /var/run/docker.sock:/var/run/docker.sock ...` already
+# works for a plain container) INTO the kind node's own filesystem. A
+# Pod's hostPath volume later in this phase refers to the K8s NODE's
+# filesystem - for kind, that IS this container - so mounting it here is
+# what makes the hostPath volume in worker-deployment.yaml/
+# api-deployment.yaml resolve to a real, working socket at all.
+#
+# This is "Docker-outside-of-Docker" (DooD): containers reuse the HOST's
+# single real daemon as siblings, rather than running a nested daemon
+# inside each container ("Docker-in-Docker"/DinD, heavier, usually needs
+# --privileged). See k8s/README.md for the real security tradeoff this
+# implies - it is NOT how a production multi-tenant cluster would do this.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+      # A second, deeper DooD gotcha, found live: `docker build` sends its
+      # context as a tar stream over the API connection, so the Build
+      # pipeline (inside the API Pod) works fine nested. But
+      # containerExecutor.ts's `docker run -v <path>:/output` for
+      # INVOCATIONS is different - `<path>` must exist on the DAEMON's
+      # OWN filesystem, not the calling Pod's private one. The Worker's
+      # own /tmp is invisible to the real daemon; asking it to bind-mount
+      # a path it can't see makes it silently auto-create an empty,
+      # root-owned phantom directory instead, which is a completely
+      # different piece of storage than what containerExecutor.ts wrote.
+      # This shared path is real on BOTH sides of the mount chain - the
+      # actual host filesystem, this kind node, and (via a matching
+      # hostPath volume in worker-deployment.yaml) the Worker Pod - so a
+      # scratch file the Pod writes and a bind-mount the daemon resolves
+      # both land on the exact same physical bytes.
+      - hostPath: /tmp/mini-cloud-scratch
+        containerPath: /tmp/mini-cloud-scratch
+    extraPortMappings:
+      # Exposes the API's NodePort straight to the host, so it's reachable
+      # at http://localhost:30080 without a full ingress controller
+      # install - see the Ingress manifest and k8s/README.md for what a
+      # more realistic setup looks like.
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP

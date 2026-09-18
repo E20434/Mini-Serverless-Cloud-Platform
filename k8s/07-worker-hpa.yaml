@@ -1,0 +1,36 @@
+# HorizontalPodAutoscaler: watches a metric and adjusts `replicas` on a
+# target Deployment automatically - the automated version of Phase 11's
+# manual "start 4 more worker processes." Out of the box, K8s's HPA only
+# understands CPU/memory (the "resource metrics" API, backed by
+# metrics-server) - reaching for anything else (a custom Prometheus
+# metric) requires an adapter, most commonly KEDA today.
+#
+# Worth being honest about a real limitation here, not papering over it:
+# THIS worker is mostly I/O-bound - it spends its time blocked on a
+# Redis BLOCK read or waiting on `docker run`, not burning CPU. A
+# CPU-based HPA is watching the wrong signal for our actual bottleneck
+# (Phase 11 found that bottleneck was CONCURRENT CAPACITY, not CPU) - it
+# may barely trigger even under real backpressure. This HPA is a real,
+# working taste of autoscaling, not the final answer: true capacity-aware
+# scaling needs to watch `mini_cloud_invocation_queue_depth` (the exact
+# metric Phase 10 built and Phase 11 fixed) via KEDA's Prometheus scaler
+# - that's Phase 14's job, deliberately not built here.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mini-cloud-worker-hpa
+  namespace: mini-cloud
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mini-cloud-worker
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60

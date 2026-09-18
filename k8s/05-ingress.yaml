@@ -1,0 +1,31 @@
+# Ingress: HTTP(S)-aware routing (host/path rules, TLS termination) sitting
+# in front of one or more Services - the L7 entry point a real cluster
+# uses instead of exposing NodePorts directly. This manifest needs an
+# actual ingress CONTROLLER running in the cluster to do anything at all
+# (ingress-nginx, or a cloud provider's managed equivalent) - a resource
+# with no controller watching for it is inert. Written here for
+# completeness/teaching; this phase's live verification uses the simpler
+# NodePort from 04-api-service.yaml instead, to avoid a full
+# ingress-nginx install just to reach one Service locally. Install
+# ingress-nginx for kind (`kubectl apply -f
+# https://raw.githubusercontent.com/kubernetes/ingress-nginx/.../kind/deploy.yaml`)
+# to make this manifest do something real.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mini-cloud-ingress
+  namespace: mini-cloud
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mini-cloud-api
+                port:
+                  number: 3000

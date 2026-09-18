@@ -1,0 +1,23 @@
+# Service: a stable virtual IP + DNS name (mini-cloud-api.mini-cloud.svc)
+# in front of however many API Pods currently exist and are Ready. This
+# is the K8s-native version of what Redis Streams' consumer groups did
+# for OUR OWN Worker fleet (Phase 6/8) - spreading requests across
+# multiple live backends without the caller ever needing to know how
+# many there are or which one answered. type: NodePort exposes it on
+# every cluster node at a fixed port (30080, matching kind-config.yaml's
+# extraPortMappings) purely so this stays reachable without installing a
+# full ingress controller - see 05-ingress.yaml and k8s/README.md for
+# what a more realistic external entry point looks like.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mini-cloud-api
+  namespace: mini-cloud
+spec:
+  type: NodePort
+  selector:
+    app: mini-cloud-api
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30080

@@ -1,0 +1,44 @@
+# Containerizes the Worker process. Notably smaller runtime surface than
+# the API image at the APPLICATION level (no Prisma client needed - the
+# Worker still touches zero Postgres, per Phase 7's design) - but it
+# needs the exact same `docker` CLI + host-daemon access as the API,
+# because it's the process that actually runs `docker run` for every
+# invocation (containerExecutor.ts). See k8s/README.md for the
+# Docker-in-Kubernetes discussion this requires.
+#
+# One `npm ci` only (see Dockerfile.api's comment for why a second,
+# separate install in the runtime stage is both wasted work and a real
+# reliability risk, not just a style preference).
+#
+# `prisma generate` runs here even though the Worker never touches
+# Postgres at runtime (Phase 7's design, unchanged) - a real, structural
+# consequence of this project being one package with one shared
+# tsconfig.json rather than a proper monorepo with per-service packages:
+# `tsc` compiles ALL of src/ as one program, including functions.service.ts
+# (which the Worker's own entrypoint never imports), and that file
+# references Prisma's generated types. Without generating them first,
+# the whole-program type-check fails even though the Worker's actual
+# runtime code path never needs them. A real monorepo split would avoid
+# this entirely; that's a legitimate future refactor, not fixed here.
+FROM node:20-alpine AS builder
+RUN apk add --no-cache openssl
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma ./prisma
+RUN npx prisma generate
+COPY tsconfig.json ./
+COPY src ./src
+RUN npx tsc -p tsconfig.json
+
+FROM node:20-alpine
+RUN apk add --no-cache docker-cli
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
+
+EXPOSE 9200
+CMD ["node", "dist/worker-main.js"]
