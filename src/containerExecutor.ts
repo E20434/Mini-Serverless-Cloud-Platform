@@ -83,10 +83,34 @@ async function runIsolatedContainer(
   const cpus = options.cpus ?? 0.5;
   const start = Date.now();
 
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mini-cloud-'));
+  // HOST_SCRATCH_DIR overrides where per-invocation scratch files live -
+  // needed ONLY when this process (the Worker) is itself a container
+  // calling a Docker daemon it doesn't own (Docker-outside-of-Docker, see
+  // k8s/kind-config.yaml's comment): `docker run -v <path>:/output`
+  // requires <path> to exist on the DAEMON's own filesystem, not this
+  // process's private one, so the scratch directory must live somewhere
+  // both sides genuinely share. On a bare host (every phase before this
+  // one), this process and the daemon already share one real filesystem,
+  // so the default os.tmpdir() is correct and this variable is unset.
+  const scratchRoot = process.env.HOST_SCRATCH_DIR || os.tmpdir();
+  const workDir = fs.mkdtempSync(path.join(scratchRoot, 'mini-cloud-'));
   const eventPath = path.join(workDir, 'event.json');
   const outputDir = path.join(workDir, 'output');
   fs.mkdirSync(outputDir);
+  // Phase 12, found running for real inside a Kubernetes Pod, not
+  // hypothesized: on every previous bare-Windows-host run, Docker
+  // Desktop's bind-mount translation silently ignored Linux UID/GID
+  // permission bits, so this never mattered. Once the Worker itself
+  // became a real Linux container, this directory (created here as
+  // root, default mode 0755) is a genuine Linux filesystem entry with
+  // genuinely enforced permissions - and the function container writes
+  // to it as UID 1000 (Phase 2's --user flag), which can read a 0755
+  // root-owned directory but cannot write into one. This is a
+  // short-lived, per-invocation scratch directory only the local Docker
+  // daemon ever touches, so making it world-writable is a negligible
+  // concern next to the docker.sock mount this whole deployment already
+  // requires (see k8s/README.md).
+  fs.chmodSync(outputDir, 0o777);
   fs.writeFileSync(eventPath, JSON.stringify(event ?? {}));
 
   const containerName = `mini-cloud-${crypto.randomUUID()}`;
