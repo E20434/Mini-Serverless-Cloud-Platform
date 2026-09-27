@@ -5,6 +5,7 @@ import { executeVersionedFunction, ExecutionOutcome } from '../containerExecutor
 import { MetricsService } from '../metrics/metrics.service';
 import { REDIS_CLIENT } from '../queue/redis.module';
 import { WorkerRegistryService } from '../worker-registry/worker-registry.service';
+import { ensureEcrLogin } from './ecr-login';
 import { INVOCATION_CONSUMER_GROUP, INVOCATION_STREAM_KEY, invocationResultChannel } from './invocation-stream.constants';
 
 const BLOCK_MS = 2000;
@@ -46,6 +47,7 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
+    await ensureEcrLogin();
     await this.ensureConsumerGroup();
     await this.sendHeartbeat();
     this.heartbeatTimer = setInterval(() => this.sendHeartbeat(), HEARTBEAT_INTERVAL_MS);
