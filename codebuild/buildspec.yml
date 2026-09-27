@@ -1,0 +1,23 @@
+version: 0.2
+
+# Every value below arrives via StartBuild's environmentVariablesOverride
+# (see codebuild-executor.ts) - this buildspec is generic on purpose, one
+# CodeBuild Project handles every function's build, parameterized per run
+# rather than templated per function.
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "${RUNTIME_IMAGE_URI%%/*}"
+      - echo "Downloading function source from s3://$SOURCE_BUCKET/$SOURCE_KEY"
+      - aws s3 cp "s3://$SOURCE_BUCKET/$SOURCE_KEY" ./handler.js
+  build:
+    commands:
+      # The same two-line Dockerfile BuildService has always generated
+      # locally (Phase 5) - only the FROM target changes, from a local
+      # tag to a real ECR URI.
+      - printf 'FROM %s\nCOPY handler.js /var/task/handler.js\n' "$RUNTIME_IMAGE_URI" > Dockerfile
+      - docker build -t "$IMAGE_URI:$IMAGE_TAG" .
+  post_build:
+    commands:
+      - docker push "$IMAGE_URI:$IMAGE_TAG"
